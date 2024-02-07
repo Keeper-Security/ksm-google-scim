@@ -18,4 +18,12 @@
 # vendor/
 
 # Go workspace file
-go.work
+go.work*
+config.base64
+config.json
+
+# Jetbrains
+.idea/
+
+# Configuration
+.env.yaml
