@@ -2,6 +2,30 @@ package scim
 
 import "strconv"
 
+func ParseScimGroups(fields []map[string]any) (groups []string) {
+	for _, field := range fields {
+		var v any
+		var ok bool
+		if v, ok = field["value"]; ok {
+			if v == nil {
+				continue
+			}
+			switch vt := v.(type) {
+			case []any:
+				for _, v = range vt {
+					var group string
+					if group, ok = v.(string); ok {
+						groups = append(groups, group)
+					}
+				}
+			case string:
+				groups = append(groups, vt)
+			}
+		}
+	}
+	return
+}
+
 func toBoolean(intf any) (result bool, ok bool) {
 	if intf == nil {
 		return
