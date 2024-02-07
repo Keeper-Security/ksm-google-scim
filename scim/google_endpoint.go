@@ -14,18 +14,18 @@ type googleEndpoint struct {
 	groups         map[string]*Group
 	jwtCredentials []byte
 	subject        string
-	scimGroup      string
+	scimGroups     []string
 }
 
 // NewGoogleEndpoint creates an ICrmDataSource for accessing Users and Groups in Google Workspace
 // credentials: GCP service account JWT credentials
 // subject: Google Workspace admin account
 // scimGroup: Google Workspace Group that
-func NewGoogleEndpoint(credentials []byte, subject string, scimGroup string) ICrmDataSource {
+func NewGoogleEndpoint(credentials []byte, subject string, scimGroups []string) ICrmDataSource {
 	return &googleEndpoint{
 		jwtCredentials: credentials,
 		subject:        subject,
-		scimGroup:      scimGroup,
+		scimGroups:     scimGroups,
 	}
 }
 
@@ -58,7 +58,33 @@ func (ge *googleEndpoint) Populate() (err error) {
 		return
 	}
 
+	var scimGroups = NewSet[string]()
+	for _, x := range ge.scimGroups {
+		x = strings.TrimSpace(x)
+		if len(x) == 0 {
+			continue
+		}
+		for _, y := range strings.Split(x, "\n") {
+			y = strings.TrimSpace(y)
+			if len(y) == 0 {
+				continue
+			}
+			for _, z := range strings.Split(y, ",") {
+				z = strings.TrimSpace(z)
+				if len(z) == 0 {
+					continue
+				}
+				scimGroups.Add(strings.ToLower(z))
+			}
+		}
+	}
+	if len(scimGroups) == 0 {
+		err = errors.New("could not resolve \"SCIM Group\" content to groups")
+		return
+	}
+
 	ge.users = make(map[string]*User)
+	var userLookup = make(map[string]*User)
 	var ul = directory.Users.List().Customer("my_customer")
 	if ul != nil {
 		var users *admin.Users
@@ -78,7 +104,10 @@ func (ge *googleEndpoint) Populate() (err error) {
 						gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
 					}
 				}
-				ge.users[gu.Id] = gu
+				userLookup[gu.Id] = gu
+				if scimGroups.Has(strings.ToLower(gu.Email)) {
+					ge.users[gu.Id] = gu
+				}
 			}
 		}
 	} else {
@@ -92,6 +121,11 @@ func (ge *googleEndpoint) Populate() (err error) {
 		var groups *admin.Groups
 		if groups, err = gl.Do(); err == nil {
 			for _, g := range groups.Groups {
+				if !scimGroups.Has(strings.ToLower(g.Email)) {
+					if !scimGroups.Has(strings.ToLower(g.Name)) {
+						continue
+					}
+				}
 				var gg = &Group{
 					Id:   g.Id,
 					Name: g.Name,
@@ -104,55 +138,23 @@ func (ge *googleEndpoint) Populate() (err error) {
 		return
 	}
 
-	var scimGroupId string
-	if len(ge.scimGroup) > 0 {
-		for _, v := range ge.groups {
-			if strings.EqualFold(v.Name, ge.scimGroup) {
-				scimGroupId = v.Id
-				break
-			}
-		}
-	}
-	if len(scimGroupId) > 0 {
-		var members *admin.Members
-		if members, err = directory.Members.List(scimGroupId).Do(); err != nil {
-			return
-		}
-		var scimUsers = NewSet[string]()
-		for _, m := range members.Members {
-			scimUsers.Add(m.Id)
-		}
-
-		var allUsers = NewSet[string]()
-		for k := range ge.users {
-			allUsers.Add(k)
-		}
-
-		allUsers.Difference(scimUsers.ToArray())
-		for _, k := range allUsers.ToArray() {
-			delete(ge.users, k)
-		}
-		delete(ge.groups, scimGroupId)
+	if len(ge.groups) == 0 && len(ge.users) == 0 {
+		err = errors.New("no Google Workspace groups could be resolved")
+		return
 	}
 
-	var allGroups = NewSet[string]()
-	for k := range ge.groups {
-		allGroups.Add(k)
-	}
-	for _, groupId := range allGroups.ToArray() {
+	for groupId := range ge.groups {
 		var members *admin.Members
 		if members, err = directory.Members.List(groupId).Do(); err != nil {
 			return
 		}
-		var used = false
 		for _, m := range members.Members {
-			if u, ok := ge.users[m.Id]; ok {
-				used = true
+			if u, ok := userLookup[m.Id]; ok {
 				u.Groups = append(u.Groups, groupId)
+				if _, ok = ge.users[u.Id]; !ok {
+					ge.users[u.Id] = u
+				}
 			}
-		}
-		if !used {
-			delete(ge.groups, groupId)
 		}
 	}
 

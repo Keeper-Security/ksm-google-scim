@@ -27,3 +27,4 @@ config.json
 
 # Configuration
 .env.yaml
+*.zip

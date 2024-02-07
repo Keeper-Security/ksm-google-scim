@@ -69,8 +69,21 @@ func main() {
 	var files = scimRecord.FindFiles("credentials.json")
 	var credentials = files[0].GetFileData()
 	var subject = scimRecord.GetFieldValueByType("login")
-	var scimGroup = scimRecord.GetCustomFieldValueByLabel("SCIM Group")
-	var googleEndpoint = scim.NewGoogleEndpoint(credentials, subject, scimGroup)
+
+	var fields = scimRecord.GetCustomFieldsByLabel("SCIM Group")
+	if len(fields) == 0 {
+		err = errors.New("\"SCIM Group\" custom field was not found. Please add a custom field \"SCIM Group\" to your record")
+		log.Println(err)
+		return
+	}
+	var scimGroups = scim.ParseScimGroups(fields)
+	if len(fields) == 0 {
+		err = errors.New("\"SCIM Group\" custom field does not contain any value")
+		log.Println(err)
+		return
+	}
+
+	var googleEndpoint = scim.NewGoogleEndpoint(credentials, subject, scimGroups)
 
 	var scimUrl = scimRecord.GetFieldValueByType("url")
 	var token = scimRecord.Password()
