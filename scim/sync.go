@@ -222,10 +222,10 @@ func (s *sync) syncUsers() (successes []string, failures []string, err error) {
 			if len(value) > 0 {
 				var op = make(map[string]any)
 				op["op"] = "replace"
-				op["value"] = []any{value}
+				op["value"] = value
 				var payload = make(map[string]any)
 				payload["schemas"] = []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}
-				payload["Operations"] = op
+				payload["Operations"] = []any{op}
 				if er1 = s.patchResource("Users", keeperUser.Id, payload); er1 == nil {
 					keeperUser.ExternalId = user.Id
 					keeperUser.FullName = user.FullName
