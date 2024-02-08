@@ -116,21 +116,20 @@ func (ge *googleEndpoint) Populate() (err error) {
 	}
 
 	ge.groups = make(map[string]*Group)
+	var groupLookup = make(map[string]*Group)
 	var gl = directory.Groups.List().Customer("my_customer")
 	if gl != nil {
 		var groups *admin.Groups
 		if groups, err = gl.Do(); err == nil {
 			for _, g := range groups.Groups {
-				if !scimGroups.Has(strings.ToLower(g.Email)) {
-					if !scimGroups.Has(strings.ToLower(g.Name)) {
-						continue
-					}
-				}
 				var gg = &Group{
 					Id:   g.Id,
 					Name: g.Name,
 				}
-				ge.groups[gg.Id] = gg
+				groupLookup[gg.Id] = gg
+				if scimGroups.Has(strings.ToLower(g.Email)) || scimGroups.Has(strings.ToLower(g.Name)) {
+					ge.groups[gg.Id] = gg
+				}
 			}
 		}
 	} else {
@@ -143,16 +142,41 @@ func (ge *googleEndpoint) Populate() (err error) {
 		return
 	}
 
+	var ok bool
+	// expand embedded groups
+	var membershipCache = make(map[string][]string)
 	for groupId := range ge.groups {
-		var members *admin.Members
-		if members, err = directory.Members.List(groupId).Do(); err != nil {
-			return
-		}
-		for _, m := range members.Members {
-			if u, ok := userLookup[m.Id]; ok {
-				u.Groups = append(u.Groups, groupId)
-				if _, ok = ge.users[u.Id]; !ok {
-					ge.users[u.Id] = u
+		var groupIds = []string{groupId}
+		var queuedIds = MakeSet[string](groupIds)
+		var pos = 0
+		for pos < len(groupIds) {
+			var gId = groupIds[pos]
+			pos++
+
+			var memberIds []string
+			if memberIds, ok = membershipCache[gId]; !ok {
+				var members *admin.Members
+				if members, err = directory.Members.List(gId).Do(); err != nil {
+					return
+				}
+				for _, m := range members.Members {
+					memberIds = append(memberIds, m.Id)
+				}
+				membershipCache[gId] = memberIds
+			}
+			var u *User
+			var g *Group
+			for _, mId := range memberIds {
+				if u, ok = userLookup[mId]; ok {
+					u.Groups = append(u.Groups, groupId)
+					if _, ok = ge.users[u.Id]; !ok {
+						ge.users[u.Id] = u
+					}
+				} else if g, ok = groupLookup[mId]; ok {
+					if !queuedIds.Has(g.Id) {
+						groupIds = append(groupIds, g.Id)
+						queuedIds.Add(g.Id)
+					}
 				}
 			}
 		}
