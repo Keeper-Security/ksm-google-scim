@@ -89,8 +89,10 @@ func (s *sync) syncGroups() (successes []string, failures []string, err error) {
 				extKeys = append(extKeys, k)
 			}
 			var scimKeys []string
-			for k := range keeperGroups {
-				scimKeys = append(scimKeys, k)
+			for k, v := range keeperGroups {
+				if len(v.ExternalId) > 0 {
+					scimKeys = append(scimKeys, k)
+				}
 			}
 			var minKeys = len(extKeys)
 			if minKeys > len(scimKeys) {
@@ -162,11 +164,15 @@ func (s *sync) syncGroups() (successes []string, failures []string, err error) {
 
 	if len(keeperGroups) > 0 {
 		for groupId, group := range keeperGroups {
-			if er1 = s.deleteResource("Groups", groupId); er1 == nil {
-				delete(s.scimGroups, groupId)
-				successes = append(successes, fmt.Sprintf("SCIM deleted group \"%s\"", group.Name))
+			if len(group.ExternalId) > 0 {
+				if er1 = s.deleteResource("Groups", groupId); er1 == nil {
+					delete(s.scimGroups, groupId)
+					successes = append(successes, fmt.Sprintf("SCIM deleted group \"%s\"", group.Name))
+				} else {
+					failures = append(failures, fmt.Sprintf("DELETE group \"%s\" error: %s", group.Name, er1))
+				}
 			} else {
-				failures = append(failures, fmt.Sprintf("DELETE group \"%s\" error: %s", group.Name, er1))
+				failures = append(failures, fmt.Sprintf("DELETE group \"%s\": delete skipped since the group is not controlled by SCIM", group.Name))
 			}
 		}
 	}
