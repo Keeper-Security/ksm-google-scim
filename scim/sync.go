@@ -302,28 +302,35 @@ func (s *sync) syncMembership() (successes []string, failures []string, err erro
 	}
 	var ok bool
 	var keeperUser *scimUser
+	var keeperGroup *scimGroup
 	s.source.Users(func(user *User) {
 		if keeperUser, ok = keeperUserLookup[fold.String(user.Email)]; !ok {
 			return
 		}
+		var keeperGroupId string
 		var keeperUserGroups = MakeSet[string](keeperUser.Groups)
-		var skipDeletion = false
 		var addGroups, removeGroups []string
 		for _, externalGroupId := range user.Groups {
-			var keeperGroupId string
 			if keeperGroupId, ok = keeperGroupMap[externalGroupId]; ok {
 				if keeperUserGroups.Has(keeperGroupId) {
 					keeperUserGroups.Delete(keeperGroupId)
 				} else {
 					addGroups = append(addGroups, keeperGroupId)
 				}
-			} else {
-				// TODO ?????
-				skipDeletion = true
 			}
 		}
-		if !skipDeletion && len(keeperUserGroups) > 0 {
-			removeGroups = append(removeGroups, keeperUserGroups.ToArray()...)
+		if len(keeperUserGroups) > 0 {
+			for keeperGroupId = range keeperUserGroups {
+				if keeperGroup, ok = s.scimGroups[keeperGroupId]; ok {
+					if len(keeperGroup.ExternalId) > 0 {
+						removeGroups = append(removeGroups, keeperGroupId)
+					} else {
+						failures = append(failures, fmt.Sprintf("Remove team \"%s\" from user \"%s\" skipped. Team is not controlled by SCIM", keeperGroup.Name, user.Email))
+					}
+				} else {
+					failures = append(failures, fmt.Sprintf("Remove team Id \"%s\" from user \"%s\" skipped. Team is outside of SCIM node", keeperGroupId, user.Email))
+				}
+			}
 		}
 		if len(addGroups) > 0 || len(removeGroups) > 0 {
 			var operations []any
