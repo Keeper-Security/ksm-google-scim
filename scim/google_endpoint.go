@@ -89,34 +89,32 @@ func (ge *googleEndpoint) Populate() (err error) {
 	var nextToken string
 	for firstRun || len(nextToken) > 0 {
 		firstRun = false
-		var ul *admin.UsersListCall
-		if len(nextToken) == 0 {
-			ul = directory.Users.List().Customer("my_customer")
-		} else {
-			ul = directory.Users.List().PageToken(nextToken)
+		var ul = directory.Users.List().Customer("my_customer")
+		if len(nextToken) > 0 {
+			ul = ul.PageToken(nextToken)
 		}
-		if ul != nil {
-			var users *admin.Users
-			if users, err = ul.Do(); err == nil {
-				for _, u := range users.Users {
-					var gu = &User{
-						Id:     u.Id,
-						Email:  u.PrimaryEmail,
-						Active: !u.Suspended,
+
+		var users *admin.Users
+		if users, err = ul.Do(); err == nil {
+			nextToken = users.NextPageToken
+			for _, u := range users.Users {
+				var gu = &User{
+					Id:     u.Id,
+					Email:  u.PrimaryEmail,
+					Active: !u.Suspended,
+				}
+				if u.Name != nil {
+					gu.FirstName = u.Name.GivenName
+					gu.LastName = u.Name.FamilyName
+					if len(u.Name.FullName) > 0 {
+						gu.FullName = u.Name.FullName
+					} else {
+						gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
 					}
-					if u.Name != nil {
-						gu.FirstName = u.Name.GivenName
-						gu.LastName = u.Name.FamilyName
-						if len(u.Name.FullName) > 0 {
-							gu.FullName = u.Name.FullName
-						} else {
-							gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
-						}
-					}
-					userLookup[gu.Id] = gu
-					if scimGroups.Has(strings.ToLower(gu.Email)) {
-						ge.users[gu.Id] = gu
-					}
+				}
+				userLookup[gu.Id] = gu
+				if scimGroups.Has(strings.ToLower(gu.Email)) {
+					ge.users[gu.Id] = gu
 				}
 			}
 		} else {
@@ -131,11 +129,9 @@ func (ge *googleEndpoint) Populate() (err error) {
 	nextToken = ""
 	for firstRun || len(nextToken) > 0 {
 		firstRun = false
-		var gl *admin.GroupsListCall
-		if len(nextToken) == 0 {
-			gl = directory.Groups.List().Customer("my_customer")
-		} else {
-			gl = directory.Groups.List().PageToken(nextToken)
+		var gl = directory.Groups.List().Customer("my_customer")
+		if len(nextToken) >= 0 {
+			gl = gl.PageToken(nextToken)
 		}
 		if gl != nil {
 			var groups *admin.Groups
