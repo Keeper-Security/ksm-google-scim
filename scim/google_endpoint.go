@@ -85,56 +85,77 @@ func (ge *googleEndpoint) Populate() (err error) {
 
 	ge.users = make(map[string]*User)
 	var userLookup = make(map[string]*User)
-	var ul = directory.Users.List().Customer("my_customer")
-	if ul != nil {
-		var users *admin.Users
-		if users, err = ul.Do(); err == nil {
-			for _, u := range users.Users {
-				var gu = &User{
-					Id:     u.Id,
-					Email:  u.PrimaryEmail,
-					Active: !u.Suspended,
-				}
-				if u.Name != nil {
-					gu.FirstName = u.Name.GivenName
-					gu.LastName = u.Name.FamilyName
-					if len(u.Name.FullName) > 0 {
-						gu.FullName = u.Name.FullName
-					} else {
-						gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
+	var firstRun = true
+	var nextToken string
+	for firstRun || len(nextToken) > 0 {
+		firstRun = false
+		var ul *admin.UsersListCall
+		if len(nextToken) == 0 {
+			ul = directory.Users.List().Customer("my_customer")
+		} else {
+			ul = directory.Users.List().PageToken(nextToken)
+		}
+		if ul != nil {
+			var users *admin.Users
+			if users, err = ul.Do(); err == nil {
+				for _, u := range users.Users {
+					var gu = &User{
+						Id:     u.Id,
+						Email:  u.PrimaryEmail,
+						Active: !u.Suspended,
+					}
+					if u.Name != nil {
+						gu.FirstName = u.Name.GivenName
+						gu.LastName = u.Name.FamilyName
+						if len(u.Name.FullName) > 0 {
+							gu.FullName = u.Name.FullName
+						} else {
+							gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
+						}
+					}
+					userLookup[gu.Id] = gu
+					if scimGroups.Has(strings.ToLower(gu.Email)) {
+						ge.users[gu.Id] = gu
 					}
 				}
-				userLookup[gu.Id] = gu
-				if scimGroups.Has(strings.ToLower(gu.Email)) {
-					ge.users[gu.Id] = gu
-				}
 			}
+		} else {
+			err = errors.New("google directory API: error querying users")
+			return
 		}
-	} else {
-		err = errors.New("google directory API: error querying users")
-		return
 	}
 
 	ge.groups = make(map[string]*Group)
 	var groupLookup = make(map[string]*Group)
-	var gl = directory.Groups.List().Customer("my_customer")
-	if gl != nil {
-		var groups *admin.Groups
-		if groups, err = gl.Do(); err == nil {
-			for _, g := range groups.Groups {
-				var gg = &Group{
-					Id:   g.Id,
-					Name: g.Name,
-				}
-				groupLookup[gg.Id] = gg
-				if scimGroups.Has(strings.ToLower(g.Email)) || scimGroups.Has(strings.ToLower(g.Name)) {
-					ge.groups[gg.Id] = gg
+	firstRun = true
+	nextToken = ""
+	for firstRun || len(nextToken) > 0 {
+		firstRun = false
+		var gl *admin.GroupsListCall
+		if len(nextToken) == 0 {
+			gl = directory.Groups.List().Customer("my_customer")
+		} else {
+			gl = directory.Groups.List().PageToken(nextToken)
+		}
+		if gl != nil {
+			var groups *admin.Groups
+			if groups, err = gl.Do(); err == nil {
+				nextToken = groups.NextPageToken
+				for _, g := range groups.Groups {
+					var gg = &Group{
+						Id:   g.Id,
+						Name: g.Name,
+					}
+					groupLookup[gg.Id] = gg
+					if scimGroups.Has(strings.ToLower(g.Email)) || scimGroups.Has(strings.ToLower(g.Name)) {
+						ge.groups[gg.Id] = gg
+					}
 				}
 			}
+		} else {
+			err = errors.New("google directory API: error querying users")
+			return
 		}
-	} else {
-		err = errors.New("google directory API: error querying users")
-		return
 	}
 
 	if len(ge.groups) == 0 && len(ge.users) == 0 {
