@@ -3,9 +3,11 @@ package scim
 import (
 	"context"
 	"errors"
+	"fmt"
 	"golang.org/x/oauth2/google"
 	admin "google.golang.org/api/admin/directory/v1"
 	"google.golang.org/api/option"
+	"net/mail"
 	"strings"
 )
 
@@ -15,6 +17,7 @@ type googleEndpoint struct {
 	jwtCredentials []byte
 	subject        string
 	scimGroups     []string
+	logger         SyncDebugLogger
 }
 
 // NewGoogleEndpoint creates an ICrmDataSource for accessing Users and Groups in Google Workspace
@@ -26,6 +29,19 @@ func NewGoogleEndpoint(credentials []byte, subject string, scimGroups []string) 
 		jwtCredentials: credentials,
 		subject:        subject,
 		scimGroups:     scimGroups,
+	}
+}
+func (ge *googleEndpoint) DebugLogger() SyncDebugLogger {
+	if ge.logger != nil {
+		return ge.logger
+	}
+	return NilLogger
+}
+func (ge *googleEndpoint) SetDebugLogger(logger SyncDebugLogger) {
+	ge.logger = logger
+	if logger == nil {
+		ge.logger = NilLogger
+	} else {
 	}
 }
 
@@ -43,6 +59,24 @@ func (ge *googleEndpoint) Groups(cb func(*Group)) {
 			cb(v)
 		}
 	}
+}
+
+func parseGoogleUser(gu *admin.User) (su *User) {
+	su = &User{
+		Id:     gu.Id,
+		Email:  gu.PrimaryEmail,
+		Active: !gu.Suspended,
+	}
+	if gu.Name != nil {
+		su.FirstName = gu.Name.GivenName
+		su.LastName = gu.Name.FamilyName
+		if len(gu.Name.FullName) > 0 {
+			su.FullName = gu.Name.FullName
+		} else {
+			su.FullName = strings.TrimSpace(strings.Join([]string{gu.Name.GivenName, gu.Name.FamilyName}, " "))
+		}
+	}
+	return
 }
 
 func (ge *googleEndpoint) Populate() (err error) {
@@ -84,73 +118,48 @@ func (ge *googleEndpoint) Populate() (err error) {
 	}
 
 	ge.users = make(map[string]*User)
-	var userLookup = make(map[string]*User)
-	var firstRun = true
-	var nextToken string
-	for firstRun || len(nextToken) > 0 {
-		firstRun = false
-		var ul = directory.Users.List().Customer("my_customer")
-		if len(nextToken) > 0 {
-			ul = ul.PageToken(nextToken)
-		}
-
-		var users *admin.Users
-		if users, err = ul.Do(); err == nil {
-			nextToken = users.NextPageToken
-			for _, u := range users.Users {
-				var gu = &User{
-					Id:     u.Id,
-					Email:  u.PrimaryEmail,
-					Active: !u.Suspended,
-				}
-				if u.Name != nil {
-					gu.FirstName = u.Name.GivenName
-					gu.LastName = u.Name.FamilyName
-					if len(u.Name.FullName) > 0 {
-						gu.FullName = u.Name.FullName
-					} else {
-						gu.FullName = strings.TrimSpace(strings.Join([]string{u.Name.GivenName, u.Name.FamilyName}, " "))
-					}
-				}
-				userLookup[gu.Id] = gu
-				if scimGroups.Has(strings.ToLower(gu.Email)) {
-					ge.users[gu.Id] = gu
-				}
-			}
-		} else {
-			err = errors.New("google directory API: error querying users")
-			return
-		}
-	}
-
 	ge.groups = make(map[string]*Group)
-	var groupLookup = make(map[string]*Group)
-	firstRun = true
-	nextToken = ""
-	for firstRun || len(nextToken) > 0 {
-		firstRun = false
-		var gl = directory.Groups.List().Customer("my_customer")
-		if len(nextToken) >= 0 {
-			gl = gl.PageToken(nextToken)
-		}
-		if gl != nil {
-			var groups *admin.Groups
-			if groups, err = gl.Do(); err == nil {
-				nextToken = groups.NextPageToken
+
+	ge.DebugLogger()("Resolving \"SCIM Group\" content")
+	var users *admin.Users
+	var groups *admin.Groups
+	for entry := range scimGroups {
+		var address *mail.Address
+		if address, err = mail.ParseAddress(entry); err == nil {
+			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
+			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
 				for _, g := range groups.Groups {
-					var gg = &Group{
+					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" for email \"%s\"", g.Name, g.Email))
+					ge.groups[g.Id] = &Group{
 						Id:   g.Id,
 						Name: g.Name,
 					}
-					groupLookup[gg.Id] = gg
-					if scimGroups.Has(strings.ToLower(g.Email)) || scimGroups.Has(strings.ToLower(g.Name)) {
-						ge.groups[gg.Id] = gg
+				}
+			} else {
+				var ul = directory.Users.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
+				if users, err = ul.Do(); err == nil && len(users.Users) > 0 {
+					for _, u := range users.Users {
+						ge.DebugLogger()(fmt.Sprintf("Found Google user for email \"%s\"", u.PrimaryEmail))
+						var su = parseGoogleUser(u)
+						ge.users[su.Id] = su
 					}
+				} else {
+					ge.DebugLogger()(fmt.Sprintf("An email \"%s\" could not be resolved as either Google User or Group", address.Address))
 				}
 			}
 		} else {
-			err = errors.New("google directory API: error querying users")
-			return
+			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("name='%s'", entry))
+			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+				for _, g := range groups.Groups {
+					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" by name", g.Name))
+					ge.groups[g.Id] = &Group{
+						Id:   g.Id,
+						Name: g.Name,
+					}
+				}
+			} else {
+				ge.DebugLogger()(fmt.Sprintf("A name \"%s\" could not be resolved as Group. Names are case sensitive", address.Address))
+			}
 		}
 	}
 
@@ -159,10 +168,27 @@ func (ge *googleEndpoint) Populate() (err error) {
 		return
 	}
 
+	ge.DebugLogger()("Loading all users")
+	var userLookup = make(map[string]*User)
+	if err = directory.Users.List().Customer("my_customer").MaxResults(200).Pages(ctx, func(users *admin.Users) error {
+		var no = 0
+		for _, u := range users.Users {
+			var su = parseGoogleUser(u)
+			userLookup[su.Id] = su
+			no++
+		}
+		ge.DebugLogger()(fmt.Sprintf("User page contains %d element(s)", no))
+		return nil
+	}); err != nil {
+		err = errors.New("google directory API: error querying users")
+		return
+	}
+	ge.DebugLogger()(fmt.Sprintf("Total %d Google user(s) loaded", len(userLookup)))
+
 	var ok bool
 	// expand embedded groups
 	var membershipCache = make(map[string][]string)
-	for groupId := range ge.groups {
+	for groupId, group := range ge.groups {
 		var groupIds = []string{groupId}
 		var queuedIds = MakeSet[string](groupIds)
 		var pos = 0
@@ -172,12 +198,13 @@ func (ge *googleEndpoint) Populate() (err error) {
 
 			var memberIds []string
 			if memberIds, ok = membershipCache[gId]; !ok {
-				var members *admin.Members
-				if members, err = directory.Members.List(gId).Do(); err != nil {
-					return
-				}
-				for _, m := range members.Members {
-					memberIds = append(memberIds, m.Id)
+				if err = directory.Members.List(gId).Pages(ctx, func(members *admin.Members) error {
+					for _, m := range members.Members {
+						memberIds = append(memberIds, m.Id)
+					}
+					return nil
+				}); err != nil {
+					ge.DebugLogger()(fmt.Sprintf("Loaded group \"%s\" membership failed: %s", group.Name, err.Error()))
 				}
 				membershipCache[gId] = memberIds
 			}
@@ -189,7 +216,7 @@ func (ge *googleEndpoint) Populate() (err error) {
 					if _, ok = ge.users[u.Id]; !ok {
 						ge.users[u.Id] = u
 					}
-				} else if g, ok = groupLookup[mId]; ok {
+				} else {
 					if !queuedIds.Has(g.Id) {
 						groupIds = append(groupIds, g.Id)
 						queuedIds.Add(g.Id)

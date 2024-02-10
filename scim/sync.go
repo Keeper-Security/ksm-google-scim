@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/text/cases"
+	"log"
 )
 
 // NewScimSync creates IScimSync interface for syncing with external CRMs
@@ -11,24 +12,38 @@ import (
 // url: base SCIM URL
 // token: SCIM token
 func NewScimSync(source ICrmDataSource, url string, token string) IScimSync {
-	return &sync{
+	var s = &sync{
 		source:  source,
 		baseUrl: url,
 		token:   token,
 	}
+	source.SetDebugLogger(s.debugLogger)
+	return s
 }
 
 type sync struct {
-	source     ICrmDataSource
-	scimUsers  map[string]*scimUser
-	scimGroups map[string]*scimGroup
-	baseUrl    string
-	token      string
+	source      ICrmDataSource
+	scimUsers   map[string]*scimUser
+	scimGroups  map[string]*scimGroup
+	baseUrl     string
+	token       string
+	verbose     bool
+	destructive bool
 }
 
+func (s *sync) debugLogger(message string) {
+	if s.verbose {
+		log.Println(message)
+	}
+}
 func (s *sync) Source() ICrmDataSource {
 	return s.source
 }
+func (s *sync) Verbose() bool             { return s.verbose }
+func (s *sync) SetVerbose(value bool)     { s.verbose = value }
+func (s *sync) Destructive() bool         { return s.destructive }
+func (s *sync) SetDestructive(value bool) { s.destructive = value }
+
 func (s *sync) Sync() (stat *SyncStat, err error) {
 	if err = s.Source().Populate(); err != nil {
 		return
@@ -37,12 +52,15 @@ func (s *sync) Sync() (stat *SyncStat, err error) {
 		return
 	}
 	var syncStat = new(SyncStat)
+	s.debugLogger("Synchronize groups")
 	if syncStat.SuccessGroups, syncStat.FailedGroups, err = s.syncGroups(); err != nil {
 		return
 	}
+	s.debugLogger("Synchronize users")
 	if syncStat.SuccessUsers, syncStat.FailedUsers, err = s.syncUsers(); err != nil {
 		return
 	}
+	s.debugLogger("Synchronize membership")
 	if syncStat.SuccessMembership, syncStat.FailedMembership, err = s.syncMembership(); err != nil {
 		return
 	}
@@ -164,7 +182,7 @@ func (s *sync) syncGroups() (successes []string, failures []string, err error) {
 
 	if len(keeperGroups) > 0 {
 		for groupId, group := range keeperGroups {
-			if len(group.ExternalId) > 0 {
+			if s.destructive || len(group.ExternalId) > 0 {
 				if er1 = s.deleteResource("Groups", groupId); er1 == nil {
 					delete(s.scimGroups, groupId)
 					successes = append(successes, fmt.Sprintf("SCIM deleted group \"%s\"", group.Name))
@@ -172,7 +190,9 @@ func (s *sync) syncGroups() (successes []string, failures []string, err error) {
 					failures = append(failures, fmt.Sprintf("DELETE group \"%s\" error: %s", group.Name, er1))
 				}
 			} else {
-				failures = append(failures, fmt.Sprintf("DELETE group \"%s\": delete skipped since the group is not controlled by SCIM", group.Name))
+				if s.verbose {
+					failures = append(failures, fmt.Sprintf("DELETE group \"%s\": delete skipped since the group is not controlled by SCIM", group.Name))
+				}
 			}
 		}
 	}
@@ -320,15 +340,23 @@ func (s *sync) syncMembership() (successes []string, failures []string, err erro
 			}
 		}
 		if len(keeperUserGroups) > 0 {
-			for keeperGroupId = range keeperUserGroups {
-				if keeperGroup, ok = s.scimGroups[keeperGroupId]; ok {
-					if len(keeperGroup.ExternalId) > 0 {
-						removeGroups = append(removeGroups, keeperGroupId)
+			if s.destructive {
+				removeGroups = append(removeGroups, keeperUserGroups.ToArray()...)
+			} else {
+				for keeperGroupId = range keeperUserGroups {
+					if keeperGroup, ok = s.scimGroups[keeperGroupId]; ok {
+						if len(keeperGroup.ExternalId) > 0 {
+							removeGroups = append(removeGroups, keeperGroupId)
+						} else {
+							if s.verbose {
+								failures = append(failures, fmt.Sprintf("Remove team \"%s\" from user \"%s\" skipped. Team is not controlled by SCIM", keeperGroup.Name, user.Email))
+							}
+						}
 					} else {
-						failures = append(failures, fmt.Sprintf("Remove team \"%s\" from user \"%s\" skipped. Team is not controlled by SCIM", keeperGroup.Name, user.Email))
+						if s.verbose {
+							failures = append(failures, fmt.Sprintf("Remove team Id \"%s\" from user \"%s\" skipped. Team is outside of SCIM node", keeperGroupId, user.Email))
+						}
 					}
-				} else {
-					failures = append(failures, fmt.Sprintf("Remove team Id \"%s\" from user \"%s\" skipped. Team is outside of SCIM node", keeperGroupId, user.Email))
 				}
 			}
 		}
