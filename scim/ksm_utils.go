@@ -50,7 +50,7 @@ func LoadScimParametersFromRecord(scimRecord *ksm.Record) (ka *ScimEndpointParam
 		if av, ok = value.([]any); ok {
 			if len(av) > 0 && av[0] != nil {
 				if sv, ok = av[0].(string); ok {
-					if iv, er1 := strconv.Atoi(sv); er1 != nil {
+					if iv, er1 := strconv.Atoi(sv); er1 == nil {
 						ka.Destructive = int32(iv)
 					} else {
 						ka.Destructive = -1
