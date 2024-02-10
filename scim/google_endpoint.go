@@ -214,18 +214,17 @@ func (ge *googleEndpoint) Populate() (err error) {
 				}
 				membershipCache[gId] = memberIds
 			}
-			var u *User
-			var g *Group
 			for _, mId := range memberIds {
+				var u *User
 				if u, ok = userLookup[mId]; ok {
 					u.Groups = append(u.Groups, groupId)
 					if _, ok = ge.users[u.Id]; !ok {
 						ge.users[u.Id] = u
 					}
 				} else {
-					if !queuedIds.Has(g.Id) {
-						groupIds = append(groupIds, g.Id)
-						queuedIds.Add(g.Id)
+					if !queuedIds.Has(mId) {
+						groupIds = append(groupIds, mId)
+						queuedIds.Add(mId)
 					}
 				}
 			}
