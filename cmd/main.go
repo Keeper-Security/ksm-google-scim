@@ -66,29 +66,20 @@ func main() {
 	if scimRecord == nil {
 		log.Fatal("SCIM record was not found. Make sure the record is valid and shared to KSM application")
 	}
-	var files = scimRecord.FindFiles("credentials.json")
-	var credentials = files[0].GetFileData()
-	var subject = scimRecord.GetFieldValueByType("login")
 
-	var fields = scimRecord.GetCustomFieldsByLabel("SCIM Group")
-	if len(fields) == 0 {
-		err = errors.New("\"SCIM Group\" custom field was not found. Please add a custom field \"SCIM Group\" to your record")
-		log.Println(err)
-		return
-	}
-	var scimGroups = scim.ParseScimGroups(fields)
-	if len(fields) == 0 {
-		err = errors.New("\"SCIM Group\" custom field does not contain any value")
+	var ka *scim.ScimEndpointParameters
+	var gcp *scim.GoogleEndpointParameters
+	if ka, gcp, err = scim.LoadScimParametersFromRecord(scimRecord); err != nil {
 		log.Println(err)
 		return
 	}
 
-	var googleEndpoint = scim.NewGoogleEndpoint(credentials, subject, scimGroups)
+	var googleEndpoint = scim.NewGoogleEndpoint(gcp.Credentials, gcp.AdminAccount, gcp.ScimGroups)
 
-	var scimUrl = scimRecord.GetFieldValueByType("url")
-	var token = scimRecord.Password()
+	var sync = scim.NewScimSync(googleEndpoint, ka.Url, ka.Token)
+	sync.SetVerbose(ka.Verbose)
+	sync.SetDestructive(ka.Destructive)
 
-	var sync = scim.NewScimSync(googleEndpoint, scimUrl, token)
 	var syncStat *scim.SyncStat
 	if syncStat, err = sync.Sync(); err != nil {
 		log.Fatal(err.Error())
