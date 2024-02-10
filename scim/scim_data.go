@@ -1,9 +1,16 @@
 package scim
 
+type SyncDebugLogger func(string)
+
+var NilLogger SyncDebugLogger = func(string) {}
+
 type ICrmDataSource interface {
 	Users(func(*User))
 	Groups(func(*Group))
 	Populate() error
+	DebugLogger() SyncDebugLogger
+	SetDebugLogger(SyncDebugLogger)
+	LoadErrors() bool
 }
 
 type SyncStat struct {
@@ -17,6 +24,10 @@ type SyncStat struct {
 type IScimSync interface {
 	Source() ICrmDataSource
 	Sync() (*SyncStat, error)
+	Verbose() bool
+	SetVerbose(bool)
+	Destructive() int32
+	SetDestructive(int32)
 }
 
 type User struct {
@@ -32,4 +43,17 @@ type User struct {
 type Group struct {
 	Id   string
 	Name string
+}
+
+type ScimEndpointParameters struct {
+	Url         string
+	Token       string
+	Verbose     bool
+	Destructive int32
+}
+
+type GoogleEndpointParameters struct {
+	AdminAccount string
+	Credentials  []byte
+	ScimGroups   []string
 }

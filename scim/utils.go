@@ -1,6 +1,9 @@
 package scim
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 func ParseScimGroups(fields []map[string]any) (groups []string) {
 	for _, field := range fields {
@@ -30,7 +33,34 @@ func toBoolean(intf any) (result bool, ok bool) {
 	if intf == nil {
 		return
 	}
-	result, ok = intf.(bool)
+	var supportedValue any
+	switch fv := intf.(type) {
+	case bool, string:
+		supportedValue = fv
+	case []any:
+		if len(fv) > 0 {
+			switch fv[0].(type) {
+			case bool, string:
+				supportedValue = fv[0]
+			}
+		}
+	}
+	if supportedValue != nil {
+		switch fv := supportedValue.(type) {
+		case bool:
+			result = fv
+			ok = true
+		case string:
+			switch strings.ToLower(fv) {
+			case "1", "true", "ok":
+				result = true
+				ok = true
+			case "0", "false":
+				result = false
+				ok = true
+			}
+		}
+	}
 	return
 }
 
