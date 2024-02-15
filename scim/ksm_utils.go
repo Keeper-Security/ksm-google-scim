@@ -11,14 +11,19 @@ func LoadScimParametersFromRecord(scimRecord *ksm.Record) (ka *ScimEndpointParam
 	var credentials = files[0].GetFileData()
 	var subject = scimRecord.GetFieldValueByType("login")
 
+	var scimGroups []string
+
 	var fields = scimRecord.GetCustomFieldsByLabel("SCIM Group")
-	if len(fields) == 0 {
-		err = errors.New("\"SCIM Group\" custom field was not found. Please add a custom field \"SCIM Group\" to your record")
-		return
+	if len(fields) != 0 {
+		scimGroups = append(scimGroups, ParseScimGroups(fields)...)
 	}
-	var scimGroups = ParseScimGroups(fields)
+	fields = scimRecord.GetCustomFieldsByLabel("SCIM Groups")
+	if len(fields) != 0 {
+		scimGroups = append(scimGroups, ParseScimGroups(fields)...)
+	}
+
 	if len(scimGroups) == 0 {
-		err = errors.New("\"SCIM Group\" custom field does not contain any value")
+		err = errors.New("\"SCIM Group\" custom field is missing or does not contain any value")
 		return
 	}
 

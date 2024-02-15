@@ -131,7 +131,10 @@ func (ge *googleEndpoint) Populate() (err error) {
 		var address *mail.Address
 		if address, err = mail.ParseAddress(entry); err == nil {
 			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
-			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+			if groups, err = gl.Do(); err != nil {
+				return
+			}
+			if len(groups.Groups) > 0 {
 				for _, g := range groups.Groups {
 					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" for email \"%s\"", g.Name, g.Email))
 					ge.groups[g.Id] = &Group{
@@ -141,7 +144,10 @@ func (ge *googleEndpoint) Populate() (err error) {
 				}
 			} else {
 				var ul = directory.Users.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
-				if users, err = ul.Do(); err == nil && len(users.Users) > 0 {
+				if users, err = ul.Do(); err != nil {
+					return
+				}
+				if len(users.Users) > 0 {
 					for _, u := range users.Users {
 						ge.DebugLogger()(fmt.Sprintf("Found Google user for email \"%s\"", u.PrimaryEmail))
 						var su = parseGoogleUser(u)
@@ -154,7 +160,10 @@ func (ge *googleEndpoint) Populate() (err error) {
 			}
 		} else {
 			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("name='%s'", entry))
-			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+			if groups, err = gl.Do(); err != nil {
+				return
+			}
+			if len(groups.Groups) > 0 {
 				for _, g := range groups.Groups {
 					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" by name", g.Name))
 					ge.groups[g.Id] = &Group{
@@ -186,7 +195,6 @@ func (ge *googleEndpoint) Populate() (err error) {
 		ge.DebugLogger()(fmt.Sprintf("User page contains %d element(s)", no))
 		return nil
 	}); err != nil {
-		err = errors.New("google directory API: error querying users")
 		return
 	}
 	ge.DebugLogger()(fmt.Sprintf("Total %d Google user(s) loaded", len(userLookup)))
