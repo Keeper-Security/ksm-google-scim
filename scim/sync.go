@@ -99,7 +99,9 @@ func (s *sync) syncGroups() (successes []string, failures []string, err error) {
 		switch matchRound {
 		case 0:
 			for _, v := range keeperGroups {
-				groupLookup[v.ExternalId] = v
+				if len(v.ExternalId) > 0 {
+					groupLookup[v.ExternalId] = v
+				}
 			}
 		case 1:
 			for _, v := range keeperGroups {
