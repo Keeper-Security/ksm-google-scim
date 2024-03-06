@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/GoogleCloudPlatform/functions-framework-go v1.8.0
-	github.com/cloudevents/sdk-go/v2 v2.14.0
+	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/keeper-security/secrets-manager-go/core v1.6.2
 	golang.org/x/oauth2 v0.16.0
 	golang.org/x/text v0.14.0
