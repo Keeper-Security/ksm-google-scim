@@ -22,8 +22,9 @@ go.work*
 config.base64
 config.json
 
-# Jetbrains
+# IDEs
 .idea/
+.NERDTreeBookmarks
 
 # Configuration
 .env.yaml

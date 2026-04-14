@@ -128,43 +128,114 @@ func (ge *googleEndpoint) Populate() (err error) {
 	var users *admin.Users
 	var groups *admin.Groups
 	for entry := range scimGroups {
-		var address *mail.Address
-		if address, err = mail.ParseAddress(entry); err == nil {
-			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
-			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+		if strings.HasSuffix(entry, "*") && !strings.HasPrefix(entry, "*") {
+			// Prefix name wildcard (e.g., "keeper-scim-*")
+			var foundAny = false
+
+			// Extract the prefix by removing the asterisk
+			var prefix = strings.TrimSuffix(entry, "*")
+
+			// 1. Try email prefix first (operator: ":")
+			// Google Directory API syntax requires NO quotes and NO asterisk for prefix searches
+			var emailQuery = fmt.Sprintf("email:%s*", prefix)
+			ge.DebugLogger()(fmt.Sprintf("Sending Google API Query: %s", emailQuery))
+
+			var el = directory.Groups.List().Customer("my_customer").Query(emailQuery)
+			if egroups, err := el.Do(); err == nil && len(egroups.Groups) > 0 {
+				foundAny = true
+				for _, g := range egroups.Groups {
+					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" matching email prefix \"%s\"", g.Name, entry))
+					ge.groups[g.Id] = &Group{
+						Id:   g.Id,
+						Name: g.Name,
+					}
+				}
+			} else if err != nil {
+				ge.DebugLogger()(fmt.Sprintf("Google API error for email query '%s': %v", emailQuery, err))
+			}
+
+			// 2. Try name prefix (operator: ":")
+			var nameQuery = fmt.Sprintf("name:%s*", prefix)
+			ge.DebugLogger()(fmt.Sprintf("Sending Google API Query: %s", nameQuery))
+
+			var nl = directory.Groups.List().Customer("my_customer").Query(nameQuery)
+			if ngroups, err := nl.Do(); err == nil && len(ngroups.Groups) > 0 {
+				foundAny = true
+				for _, g := range ngroups.Groups {
+					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" matching name prefix \"%s\"", g.Name, entry))
+					ge.groups[g.Id] = &Group{
+						Id:   g.Id,
+						Name: g.Name,
+					}
+				}
+			} else if err != nil {
+				ge.DebugLogger()(fmt.Sprintf("Google API error for name query '%s': %v", nameQuery, err))
+			}
+
+			if !foundAny {
+				ge.DebugLogger()(fmt.Sprintf("No groups found matching prefix wildcard \"%s\"", entry))
+				ge.loadErrors = true
+			}
+		} else if strings.HasPrefix(entry, "*@") {
+			// Domain email wildcard (e.g., "*@webfx.com")
+			var domain = strings.TrimPrefix(entry, "*@")
+			ge.DebugLogger()(fmt.Sprintf("Sending Google API Query (Domain filter): domain='%s'", domain))
+			var gl = directory.Groups.List().Domain(domain)
+			if groups, err := gl.Do(); err == nil && len(groups.Groups) > 0 {
 				for _, g := range groups.Groups {
-					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" for email \"%s\"", g.Name, g.Email))
+					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" matching domain \"%s\"", g.Name, domain))
 					ge.groups[g.Id] = &Group{
 						Id:   g.Id,
 						Name: g.Name,
 					}
 				}
 			} else {
-				var ul = directory.Users.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
-				if users, err = ul.Do(); err == nil && len(users.Users) > 0 {
-					for _, u := range users.Users {
-						ge.DebugLogger()(fmt.Sprintf("Found Google user for email \"%s\"", u.PrimaryEmail))
-						var su = parseGoogleUser(u)
-						ge.users[su.Id] = su
-					}
-				} else {
-					ge.DebugLogger()(fmt.Sprintf("An email \"%s\" could not be resolved as either Google User or Group", address.Address))
-					ge.loadErrors = true
+				if err != nil {
+					ge.DebugLogger()(fmt.Sprintf("Google API error for domain query '%s': %v", domain, err))
 				}
+				ge.DebugLogger()(fmt.Sprintf("No groups found matching domain wildcard \"%s\"", entry))
+				ge.loadErrors = true
 			}
 		} else {
-			var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("name='%s'", entry))
-			if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
-				for _, g := range groups.Groups {
-					ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" by name", g.Name))
-					ge.groups[g.Id] = &Group{
-						Id:   g.Id,
-						Name: g.Name,
+			// Exact match (Email or Name)
+			var address *mail.Address
+			if address, err = mail.ParseAddress(entry); err == nil {
+				var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
+				if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+					for _, g := range groups.Groups {
+						ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" for email \"%s\"", g.Name, g.Email))
+						ge.groups[g.Id] = &Group{
+							Id:   g.Id,
+							Name: g.Name,
+						}
+					}
+				} else {
+					var ul = directory.Users.List().Customer("my_customer").Query(fmt.Sprintf("email=%s", address.Address))
+					if users, err = ul.Do(); err == nil && len(users.Users) > 0 {
+						for _, u := range users.Users {
+							ge.DebugLogger()(fmt.Sprintf("Found Google user for email \"%s\"", u.PrimaryEmail))
+							var su = parseGoogleUser(u)
+							ge.users[su.Id] = su
+						}
+					} else {
+						ge.DebugLogger()(fmt.Sprintf("An email \"%s\" could not be resolved as either Google User or Group", address.Address))
+						ge.loadErrors = true
 					}
 				}
 			} else {
-				ge.DebugLogger()(fmt.Sprintf("A name \"%s\" could not be resolved to Google Group. Names are case sensitive", entry))
-				ge.loadErrors = true
+				var gl = directory.Groups.List().Customer("my_customer").Query(fmt.Sprintf("name='%s'", entry))
+				if groups, err = gl.Do(); err == nil && len(groups.Groups) > 0 {
+					for _, g := range groups.Groups {
+						ge.DebugLogger()(fmt.Sprintf("Found Google group \"%s\" by name", g.Name))
+						ge.groups[g.Id] = &Group{
+							Id:   g.Id,
+							Name: g.Name,
+						}
+					}
+				} else {
+					ge.DebugLogger()(fmt.Sprintf("A name \"%s\" could not be resolved to Google Group. Names are case sensitive", entry))
+					ge.loadErrors = true
+				}
 			}
 		}
 	}

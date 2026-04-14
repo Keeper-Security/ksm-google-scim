@@ -1,6 +1,7 @@
 package scim
 
 import (
+	"encoding/json"
 	"errors"
 	ksm "github.com/keeper-security/secrets-manager-go/core"
 	"strconv"
@@ -24,7 +25,7 @@ func LoadScimParametersFromRecord(scimRecord *ksm.Record) (ka *ScimEndpointParam
 
 	gcp = &GoogleEndpointParameters{
 		AdminAccount: subject,
-		Credentials:  credentials,
+		Credentials:  json.RawMessage(credentials),
 		ScimGroups:   scimGroups,
 	}
 

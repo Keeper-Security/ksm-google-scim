@@ -6,72 +6,45 @@ import (
 	ksm "github.com/keeper-security/secrets-manager-go/core"
 	"keepersecurity.com/ksm-scim/scim"
 	"log"
-	"net/url"
 	"os"
 	"path"
-	"strings"
 )
 
 func main() {
 	var err error
+	var provider scim.SecretProvider
+
 	var filePath = "config.base64"
 	if _, err = os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 		var homeDir string
-		if homeDir, err = os.UserHomeDir(); err != nil {
+		if homeDir, err = os.UserHomeDir(); err == nil {
+			filePath = path.Join(homeDir, filePath)
+		}
+	}
+
+	if _, err = os.Stat(filePath); err == nil {
+		// KSM Provider Flow
+		var data []byte
+		if data, err = os.ReadFile(filePath); err != nil {
 			log.Fatal(err)
 		}
-		filePath = path.Join(homeDir, filePath)
-	}
-	var data []byte
-	if data, err = os.ReadFile(filePath); err != nil {
-		log.Fatal(err)
-	}
-	var config = ksm.NewMemoryKeyValueStorage(string(data))
-	var sm = ksm.NewSecretsManager(&ksm.ClientOptions{
-		Config: config,
-	})
-	var filter []string
-	if len(os.Args) == 2 {
-		filter = append(filter, os.Args[1])
-	}
-
-	var records []*ksm.Record
-	if records, err = sm.GetSecrets(filter); err != nil {
-		log.Fatal(err)
-	}
-
-	var scimRecord *ksm.Record
-	for _, r := range records {
-		if r.Type() != "login" {
-			continue
+		var config = ksm.NewMemoryKeyValueStorage(string(data))
+		var filter []string
+		if len(os.Args) == 2 {
+			filter = append(filter, os.Args[1])
 		}
-		var webUrl = r.GetFieldValueByType("url")
-		if len(webUrl) == 0 {
-			continue
-		}
-		var uri *url.URL
-		if uri, err = url.Parse(webUrl); err != nil {
-			continue
-		}
-		if !strings.HasPrefix(uri.Path, "/api/rest/scim/v2/") {
-			continue
-		}
-		var files = r.FindFiles("credentials.json")
-		if len(files) == 0 {
-			continue
-		}
-		scimRecord = r
-		break
-	}
-	if scimRecord == nil {
-		log.Fatal("SCIM record was not found. Make sure the record is valid and shared to KSM application")
+		provider = scim.NewKsmProvider(config, filter)
+	} else if gcpSecretName := os.Getenv("GCP_SECRET_NAME"); gcpSecretName != "" {
+		// GCP Provider Flow
+		provider = scim.NewGcpProvider(gcpSecretName)
+	} else {
+		log.Fatal("Missing configuration: Could not find config.base64 locally or in home directory, and GCP_SECRET_NAME is not set.")
 	}
 
 	var ka *scim.ScimEndpointParameters
 	var gcp *scim.GoogleEndpointParameters
-	if ka, gcp, err = scim.LoadScimParametersFromRecord(scimRecord); err != nil {
-		log.Println(err)
-		return
+	if ka, gcp, err = provider.Load(); err != nil {
+		log.Fatal(err)
 	}
 
 	var googleEndpoint = scim.NewGoogleEndpoint(gcp.Credentials, gcp.AdminAccount, gcp.ScimGroups)

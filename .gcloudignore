@@ -16,7 +16,7 @@
 node_modules
 #!include:.gitignore
 
-README.md
+/*.md
 
 .env.yaml
 .env.yaml.sample

@@ -11,9 +11,7 @@ import (
 	"keepersecurity.com/ksm-scim/scim"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
-	"strings"
 )
 
 func init() {
@@ -26,64 +24,30 @@ const ksmConfigName = "KSM_CONFIG_BASE64"
 const ksmRecordUid = "KSM_RECORD_UID"
 
 func runScimSync() (syncStat *scim.SyncStat, err error) {
+	var provider scim.SecretProvider
+
 	var configBase64 = os.Getenv(ksmConfigName)
-	if len(configBase64) == 0 {
-		err = errors.New(fmt.Sprintf("Environment variable \"%s\" is not set", ksmConfigName))
-		log.Println(err)
-		return
-	}
+	var gcpSecretName = os.Getenv("GCP_SECRET_NAME")
 
-	var config = ksm.NewMemoryKeyValueStorage(configBase64)
-	var sm = ksm.NewSecretsManager(&ksm.ClientOptions{
-		Config: config,
-	})
-
-	var filter []string
-	var recordUid = os.Getenv(ksmRecordUid)
-	if len(recordUid) > 0 {
-		filter = append(filter, recordUid)
-	}
-
-	var records []*ksm.Record
-	if records, err = sm.GetSecrets(filter); err != nil {
-		log.Println(err)
-		return
-	}
-
-	var scimRecord *ksm.Record
-	for _, r := range records {
-		if r.Type() != "login" {
-			continue
+	if len(configBase64) > 0 {
+		var config = ksm.NewMemoryKeyValueStorage(configBase64)
+		var filter []string
+		var recordUid = os.Getenv(ksmRecordUid)
+		if len(recordUid) > 0 {
+			filter = append(filter, recordUid)
 		}
-		var webUrl = r.GetFieldValueByType("url")
-		if len(webUrl) == 0 {
-			continue
-		}
-		var uri *url.URL
-		var er1 error
-		if uri, er1 = url.Parse(webUrl); er1 != nil {
-			continue
-		}
-		if !strings.HasPrefix(uri.Path, "/api/rest/scim/v2/") {
-			continue
-		}
-
-		var files = r.FindFiles("credentials.json")
-		if len(files) == 0 {
-			continue
-		}
-		scimRecord = r
-		break
-	}
-	if scimRecord == nil {
-		err = errors.New("SCIM record was not found. Make sure the record is valid and shared to KSM application")
+		provider = scim.NewKsmProvider(config, filter)
+	} else if len(gcpSecretName) > 0 {
+		provider = scim.NewGcpProvider(gcpSecretName)
+	} else {
+		err = errors.New(fmt.Sprintf("Missing configuration: Set either %s or GCP_SECRET_NAME", ksmConfigName))
 		log.Println(err)
 		return
 	}
 
 	var ka *scim.ScimEndpointParameters
 	var gcp *scim.GoogleEndpointParameters
-	if ka, gcp, err = scim.LoadScimParametersFromRecord(scimRecord); err != nil {
+	if ka, gcp, err = provider.Load(); err != nil {
 		log.Println(err)
 		return
 	}
@@ -146,7 +110,8 @@ func gcpScimSyncHttp(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		printStatistics(w, syncStat)
 	} else {
-		log.Fatal(err)
+		log.Printf("Sync failed: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 

@@ -1,5 +1,7 @@
 package scim
 
+import "encoding/json"
+
 type SyncDebugLogger func(string)
 
 var NilLogger SyncDebugLogger = func(string) {}
@@ -46,14 +48,14 @@ type Group struct {
 }
 
 type ScimEndpointParameters struct {
-	Url         string
-	Token       string
-	Verbose     bool
-	Destructive int32
+	Url         string `json:"scimUrl"`
+	Token       string `json:"scimToken"`
+	Verbose     bool   `json:"verbose"`
+	Destructive int32  `json:"destructive"`
 }
 
 type GoogleEndpointParameters struct {
-	AdminAccount string
-	Credentials  []byte
-	ScimGroups   []string
+	AdminAccount string          `json:"googleAdminAccount"`
+	Credentials  json.RawMessage `json:"googleCredentials"`
+	ScimGroups   []string        `json:"scimGroups"`
 }
