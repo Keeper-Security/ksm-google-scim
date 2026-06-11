@@ -25,6 +25,10 @@ config.json
 # Jetbrains
 .idea/
 
+# VS Code
+.vscode/
+
 # Configuration
 .env.yaml
 *.zip
+certs/*

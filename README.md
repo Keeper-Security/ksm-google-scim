@@ -17,59 +17,86 @@ Read this document: [Google Workspace User and Group Provisioning with Cloud Fun
   * Share the SCIM configuration record with this KSM application
   * `Add Device` and make sure method is `Configuration File` Base64 encoding.
 
+### Local testing
+
+Run the sync locally using a KSM configuration file (`config.base64` in the current directory or `$HOME`):
+
+```shell
+go run ./cmd/local [optional-record-uid]
+```
+
 ### Configuration with `gcloud`
+
 1. Clone this repository locally
 2. Copy `.env.yaml.sample` to `.env.yaml`
 3. Edit `.env.yaml`
    * Set `KSM_CONFIG_BASE64` to the content of the KSM configuration file generated at the previous step
    * Set `KSM_RECORD_UID` to configuration record UID created for Commander's `scim push` command
-4. Create Google Cloud function. Replace `<REGION>` placeholder with the GCP region. 
+4. Deploy to Cloud Run. Replace `<REGION>` placeholder with the GCP region.
+
 ```shell
-gcloud functions deploy <PickUniqueFunctionName> \
---gen2 \
---runtime=go121 \
---max-instances=1 \
---memory=512M \
---env-vars-file .env.yaml \
---region=<REGION> \
---timeout=120s \
---source=. \
---entry-point=GcpScimSyncHttp \
---trigger-http \
---no-allow-unauthenticated
+gcloud run deploy ksm-google-scim \
+  --source=. \
+  --region=<REGION> \
+  --memory=512Mi \
+  --timeout=120 \
+  --max-instances=1 \
+  --no-allow-unauthenticated \
+  --env-vars-file=.env.yaml
 ```
 
-### Configuration with `Google Console`
-1. Clone this repository locally
-2. Create `source.zip` file that contains "*.go" and "go.*" matches
+Alternatively, deploy the published Docker Hub image:
+
 ```shell
-zip source.zip `find . -name "*.go"`
-zip source.zip `find . -name "go.*"`
+gcloud run deploy ksm-google-scim \
+  --image=docker.io/keeper/ksm-google-scim:latest \
+  --region=<REGION> \
+  --memory=512Mi \
+  --timeout=120 \
+  --max-instances=1 \
+  --no-allow-unauthenticated \
+  --env-vars-file=.env.yaml
 ```
-3. Login to Google Console
-4. Create a new function ![Create New Function](./images/create_new_function.png)
-![Create Step 1](./images/create_step1.png)
-![Create Step 2](./images/create_step2.png)
-![Create Step 3](./images/create_step3.png)
-   * Set `KSM_CONFIG_BASE64` to the content of the KSM configuration file generated at the previous step
-   * Set `KSM_RECORD_UID` to configuration record UID created for Commander's `scim push` command
-5. Click `NEXT`
-6. Set "Entry point" to `GcpScimSyncHttp`
-7. Upload the source code using `source.zip`. "Destination bucket" can be any.
-![Create Step 4](./images/create_step4.png)
-8. Click `DEPLOY`
+
+Or build locally from the Dockerfile:
+
+```shell
+docker build --platform linux/amd64 -t ksm-google-scim .
+```
+
+If `go mod download` fails behind Zscaler, uncomment the corporate CA lines at the top of the Dockerfile.
+
+### Docker Hub image
+
+Published automatically on push to `main` or version tags (`v*`):
+
+```shell
+docker pull keeper/ksm-google-scim:latest
+```
+
+Release a version:
+
+```shell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This publishes `keeper/ksm-google-scim:1.0.0` and `keeper/ksm-google-scim:1.0`.
+
+CI uses the GitHub `prod` environment with secrets `DOCKERHUB_USER` and `DOCKERHUB_TOKEN`.
 
 ### Create Cloud Scheduler with `Google Console`
-1. Find the created function and copy function URL to the clipboard
-   ![Copy URL](./images/copy_url.png)
+
+1. Find the deployed Cloud Run service and copy its URL to the clipboard
 
 2. Search for `scheduler` and select `Cloud Scheduler`
 3. Click `CREATE JOB`. `15 * * * *` means every hour at 15th minute
 
    ![Scheduler Step 1](./images/scheduler_step1.png)
-4. Grant the scheduler access to SCIM function 
+4. Grant the scheduler service account the **Cloud Run Invoker** role (`roles/run.invoker`) on the service
 
    ![Scheduler Access](./images/scheduler_access.png)
-5. Create Scheduler and check it works by clicking `FORCE RUN`
+5. Configure the job to send an OIDC token for authentication
+6. Create Scheduler and check it works by clicking `FORCE RUN`
 
    ![Scheduler Run](./images/scheduler_run.png)

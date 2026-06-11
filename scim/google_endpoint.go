@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
+	"strings"
+
 	"golang.org/x/oauth2/google"
 	admin "google.golang.org/api/admin/directory/v1"
 	"google.golang.org/api/option"
-	"net/mail"
-	"strings"
 )
 
 type googleEndpoint struct {
