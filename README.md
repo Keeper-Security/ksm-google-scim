@@ -74,16 +74,20 @@ Published automatically on push to `main` or version tags (`v*`):
 docker pull keeper/ksm-google-scim:latest
 ```
 
-Release a version:
+### Create Cloud Run Service with `Google Console`
+1.  Navigate to Cloud Run -> Services
 
-```shell
-git tag v1.0.0
-git push origin v1.0.0
-```
+   ![Service Step 1](./images/cloud_run_step1.png)
+2. Click `Deploy container` 
+* Paste `docker.io/library/keeper/ksm-google-scim:latest` into **Container image URL**
+* Pick your `Region`
+* Select `Require authentication`
+   ![Service Step 2](./images/cloud_run_step2.png)
 
-This publishes `keeper/ksm-google-scim:1.0.0` and `keeper/ksm-google-scim:1.0`.
-
-CI uses the GitHub `prod` environment with secrets `DOCKERHUB_USER` and `DOCKERHUB_TOKEN`.
+* Expand **Containers, Networking, Security**
+* Select **Variables & Secrets** tab and add `KSM_CONFIG_BASE64` and `KSM_RECORD_UID` environment variables
+   ![Service Step 3](./images/cloud_run_step3.png)
+* Click `Create` button
 
 ### Create Cloud Scheduler with `Google Console`
 
@@ -93,10 +97,11 @@ CI uses the GitHub `prod` environment with secrets `DOCKERHUB_USER` and `DOCKERH
 3. Click `CREATE JOB`. `15 * * * *` means every hour at 15th minute
 
    ![Scheduler Step 1](./images/scheduler_step1.png)
-4. Grant the scheduler service account the **Cloud Run Invoker** role (`roles/run.invoker`) on the service
+4. `Configure the execution` Pick **HTTP** `Target type`, **GET** `HTTP method`. Paste the `ksm-google-scim` service URL
+5. Grant the scheduler service account the **Cloud Run Invoker** role (`roles/run.invoker`) on the service
 
    ![Scheduler Access](./images/scheduler_access.png)
-5. Configure the job to send an OIDC token for authentication
-6. Create Scheduler and check it works by clicking `FORCE RUN`
+6. Configure the job to send an OIDC token for authentication
+7. Create Scheduler and check it works by clicking `FORCE RUN`
 
    ![Scheduler Run](./images/scheduler_run.png)
