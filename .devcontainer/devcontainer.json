@@ -1,0 +1,30 @@
+{
+  "name": "ksm-google-scim",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=ksm-google-scim-gomodcache,target=/go/pkg/mod,type=volume",
+    "source=ksm-google-scim-gocache,target=/root/.cache/go-build,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": true,
+        "go.useLanguageServer": true,
+        "gopls": {
+          "build.buildFlags": [],
+          "ui.semanticTokens": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": "go mod download",
+  "forwardPorts": [8080],
+  "remoteUser": "root"
+}

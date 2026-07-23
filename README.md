@@ -66,6 +66,52 @@ docker build --platform linux/amd64 -t ksm-google-scim .
 
 If `go mod download` fails behind Zscaler, uncomment the corporate CA lines at the top of the Dockerfile.
 
+### Sourcing SCIM parameters from Google Secret Manager
+
+By default (`SECRET_PROVIDER=KSM`, or unset) the SCIM sync parameters are read
+from a Keeper Secrets Manager record as described above. Setting
+`SECRET_PROVIDER=GCP` bypasses Keeper entirely and builds the same parameters
+from individual [Google Secret Manager](https://cloud.google.com/secret-manager)
+secrets — one per field. This keeps the KSM configuration out of the deployment
+and lets you grant access per secret.
+
+Each of the following env vars holds a **secret reference**, not the value
+itself:
+
+| Env var | Secret content |
+| --- | --- |
+| `SCIM_URL` | SCIM endpoint URL (`https://.../api/rest/scim/v2/...`) |
+| `SCIM_TOKEN` | SCIM bearer token |
+| `GCP_ADMIN_ACCOUNT` | Google Workspace admin account to impersonate |
+| `GCP_CREDENTIALS` | Service-account `credentials.json` |
+| `SCIM_GROUPS` | Group names to sync, separated by commas or newlines |
+
+A reference may be a short secret name — the GCP project is auto-detected via
+the metadata server (available on Cloud Run) and version `latest` is used — or a
+full `projects/<PROJECT>/secrets/<SECRET>/versions/<VERSION>` resource path
+(version defaults to `latest` if omitted).
+
+Two optional behavioral flags are read as plain values (not secrets):
+`SCIM_VERBOSE` (`true`/`false`) and `SCIM_DESTRUCTIVE` (integer).
+
+Example `.env.yaml`:
+
+```yaml
+SECRET_PROVIDER: GCP
+SCIM_URL: scim-url
+SCIM_TOKEN: scim-token
+GCP_ADMIN_ACCOUNT: scim-admin-account
+GCP_CREDENTIALS: scim-credentials
+SCIM_GROUPS: scim-groups
+# Optional:
+# SCIM_VERBOSE: "false"
+# SCIM_DESTRUCTIVE: "0"
+```
+
+The Cloud Run service account needs the
+**Secret Manager Secret Accessor** role (`roles/secretmanager.secretAccessor`)
+on each referenced secret.
+
 ### Docker Hub image
 
 Published automatically on push to `main` or version tags (`v*`):

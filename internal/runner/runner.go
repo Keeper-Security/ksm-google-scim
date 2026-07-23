@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,12 +16,34 @@ import (
 const KSMConfigEnv = "KSM_CONFIG_BASE64"
 const KSMRecordUIDEnv = "KSM_RECORD_UID"
 
+// RunFromEnv resolves the SCIM sync parameters according to SECRET_PROVIDER and
+// runs the sync. With KSM (the default) the parameters come from a Keeper
+// Secrets Manager record; with GCP they are built from per-field Google Secret
+// Manager secrets.
 func RunFromEnv() (*scim.SyncStat, error) {
-	configBase64 := os.Getenv(KSMConfigEnv)
-	if len(configBase64) == 0 {
-		return nil, fmt.Errorf("environment variable %q is not set", KSMConfigEnv)
+	ctx := context.Background()
+
+	provider := os.Getenv(SecretProviderEnv)
+	if len(provider) == 0 {
+		provider = providerKSM
 	}
-	return RunFromConfig(configBase64, os.Getenv(KSMRecordUIDEnv))
+
+	switch strings.ToUpper(provider) {
+	case providerKSM:
+		configBase64 := os.Getenv(KSMConfigEnv)
+		if len(configBase64) == 0 {
+			return nil, fmt.Errorf("environment variable %q is not set", KSMConfigEnv)
+		}
+		return RunFromConfig(configBase64, os.Getenv(KSMRecordUIDEnv))
+	case providerGCP:
+		ka, gcp, err := loadScimParametersFromGCP(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return runSync(ka, gcp)
+	default:
+		return nil, fmt.Errorf("unknown %s value %q (expected %q or %q)", SecretProviderEnv, provider, providerKSM, providerGCP)
+	}
 }
 
 func RunFromConfig(configBase64, recordUID string) (*scim.SyncStat, error) {
@@ -49,6 +72,12 @@ func RunFromConfig(configBase64, recordUID string) (*scim.SyncStat, error) {
 		return nil, err
 	}
 
+	return runSync(ka, gcp)
+}
+
+// runSync builds the Google endpoint and SCIM sync from resolved parameters and
+// executes it. Shared by the KSM and GCP provider paths.
+func runSync(ka *scim.ScimEndpointParameters, gcp *scim.GoogleEndpointParameters) (*scim.SyncStat, error) {
 	googleEndpoint := scim.NewGoogleEndpoint(gcp.Credentials, gcp.AdminAccount, gcp.ScimGroups)
 	sync := scim.NewScimSync(googleEndpoint, ka.Url, ka.Token)
 	sync.SetVerbose(ka.Verbose)
